@@ -1,0 +1,177 @@
+﻿#define NUM_THREAD_X 4
+#define NUM_THREAD_Y 4
+#define TEX_FORMAT_F4 float4
+#define TEX_FORMAT_F1 float
+
+#pragma kernel CSCopyTex
+#pragma kernel CSRgb2Yuv
+#pragma kernel CSYuv2Rgb
+#pragma kernel CSBucketRgb2Yuv
+#pragma kernel CSBucketYuv2Rgb
+#pragma kernel CSFilter2D
+#pragma kernel CSClearTex
+#pragma kernel CSMargeTex
+#pragma kernel CSPargeTex
+
+int Width2x;
+int Height2x;
+
+int SrcOffsetX;
+int SrcOffsetY;
+int DstOffsetX;
+int DstOffsetY;
+
+StructuredBuffer<float4> SrcTextureData;
+Texture2D<TEX_FORMAT_F4> SrcTexture;
+Texture2D<TEX_FORMAT_F4> SrcAlpahTexture;
+RWTexture2D<TEX_FORMAT_F4> ResultTexture;
+
+RWTexture2D<TEX_FORMAT_F1> SplitY;
+RWTexture2D<TEX_FORMAT_F1> SplitU;
+RWTexture2D<TEX_FORMAT_F1> SplitV;
+
+
+int InputPlaneCount;
+StructuredBuffer<float4x4> Weight;
+StructuredBuffer<float> Bias;
+
+Texture3D<TEX_FORMAT_F1> InputPlane;
+RWTexture3D<TEX_FORMAT_F1> OutputPlane;
+
+SamplerState _LinearClamp;
+SamplerState _LinearRepeat;
+SamplerState _PointClamp;
+SamplerState _PointRepeat;
+
+[numthreads(NUM_THREAD_X,NUM_THREAD_Y,1)]
+void CSCopyTex (uint3 dispatchID : SV_DispatchThreadID)
+{
+	float _w, _h;
+    ResultTexture.GetDimensions(_w, _h);
+    
+    uint _index = dispatchID.x + _w * dispatchID.y;
+
+	TEX_FORMAT_F4 _src = SrcTextureData[_index];
+	
+    ResultTexture[dispatchID.xy] = _src;
+}
+
+[numthreads(NUM_THREAD_X,NUM_THREAD_Y,1)]
+void CSRgb2Yuv (uint3 dispatchID : SV_DispatchThreadID)
+{
+	TEX_FORMAT_F4 _src = SrcTexture[dispatchID.xy];
+	
+	SplitY[dispatchID.xy] = 0.299f * _src.x + 0.587f * _src.y + 0.114f * _src.z;
+	SplitU[dispatchID.xy] = -0.169f * _src.x - 0.332f * _src.y + 0.500f * _src.z;
+	SplitV[dispatchID.xy] = 0.500f * _src.x - 0.419f * _src.y - 0.081f * _src.z;
+}
+
+[numthreads(NUM_THREAD_X,NUM_THREAD_Y,1)]
+void CSYuv2Rgb (uint3 dispatchID : SV_DispatchThreadID)
+{
+	TEX_FORMAT_F4 _rgb = (TEX_FORMAT_F4)0;
+	_rgb.x = SplitY[dispatchID.xy] +1.402f * SplitV[dispatchID.xy];
+	_rgb.y = SplitY[dispatchID.xy] -0.714f * SplitV[dispatchID.xy] -0.344f * SplitU[dispatchID.xy];
+	_rgb.z = SplitY[dispatchID.xy] +1.772f * SplitU[dispatchID.xy];
+	
+	ResultTexture[dispatchID.xy] = float4(_rgb.xyz, 1);
+}
+
+[numthreads(NUM_THREAD_X,NUM_THREAD_Y,1)]
+void CSBucketRgb2Yuv (uint3 dispatchID : SV_DispatchThreadID)
+{
+	TEX_FORMAT_F4 _src = SrcTexture[dispatchID.xy + uint2(SrcOffsetX, SrcOffsetY)];
+	
+	SplitY[dispatchID.xy] = 0.299f * _src.x + 0.587f * _src.y + 0.114f * _src.z;
+	SplitU[dispatchID.xy] = -0.169f * _src.x - 0.332f * _src.y + 0.500f * _src.z;
+	SplitV[dispatchID.xy] = 0.500f * _src.x - 0.419f * _src.y - 0.081f * _src.z;
+}
+
+[numthreads(NUM_THREAD_X,NUM_THREAD_Y,1)]
+void CSBucketYuv2Rgb (uint3 dispatchID : SV_DispatchThreadID)
+{
+	uint _resultTextureWidth;
+	uint _resultTextureHeight;
+	ResultTexture.GetDimensions(_resultTextureWidth, _resultTextureHeight);
+
+	TEX_FORMAT_F4 _rgba = (TEX_FORMAT_F4)0;
+	uint2 _srcUV = dispatchID.xy + uint2(SrcOffsetX, SrcOffsetY);
+	uint2 _dstUV = dispatchID.xy + uint2(DstOffsetX, DstOffsetY);
+	
+	_rgba.x = SplitY[_srcUV] +1.402f * SplitV[_srcUV];
+	_rgba.y = SplitY[_srcUV] -0.714f * SplitV[_srcUV] -0.344f * SplitU[_srcUV];
+	_rgba.z = SplitY[_srcUV] +1.772f * SplitU[_srcUV];
+	_rgba.w = SrcAlpahTexture[_dstUV].w;
+
+	
+	ResultTexture[_dstUV] = _rgba;
+}
+
+
+[numthreads(NUM_THREAD_X,NUM_THREAD_Y,1)]
+void CSFilter2D (uint3 dispatchID : SV_DispatchThreadID)
+{
+	TEX_FORMAT_F1 _res = 0.0f;
+	int _weightIndexOffset = InputPlaneCount * dispatchID.z;
+	
+	uint _w, _h, _d;
+    InputPlane.GetDimensions(_w, _h, _d);	
+	
+	for (int _i = 0; _i < InputPlaneCount; ++_i)
+	{
+		int _weightIndex = _weightIndexOffset + _i;
+		for (int _r = 0; _r < 3; ++_r)
+	    {
+	        for (int _c = 0; _c < 3; ++_c)
+	        {
+	        	uint3 _uvw = uint3(dispatchID.x - 1 + _c, dispatchID.y - 1 + _r, _i);
+	        	
+	        	if ((_uvw.x == -1) || (_uvw.x == (uint)Width2x))
+	        	{
+	        		_uvw.x = dispatchID.x;
+	        	}
+	        	
+	        	if ((_uvw.y == -1) || (_uvw.y == (uint)Height2x))
+	        	{
+	        		_uvw.y = dispatchID.y;
+	        	}
+	        	
+	        	if (_uvw.y == (uint)Height2x + 1)
+	        	{
+	        		continue;  
+	        	}	        	
+				
+	            _res += InputPlane[_uvw] * Weight[_weightIndex][_r][_c];
+			}
+	    }
+    }
+    
+    
+    _res += Bias[dispatchID.z];
+    
+    //Adjust
+    if (_res < 0)
+    	_res *= 0.1f;    
+    
+    OutputPlane[dispatchID] = _res;
+}
+
+[numthreads(NUM_THREAD_X,NUM_THREAD_Y,1)]
+void CSClearTex (uint3 dispatchID : SV_DispatchThreadID)
+{
+    OutputPlane[dispatchID] = 0.0f;
+}
+
+[numthreads(NUM_THREAD_X,NUM_THREAD_Y,1)]
+void CSMargeTex (uint3 dispatchID : SV_DispatchThreadID)
+{
+	TEX_FORMAT_F1 _v = SplitY[dispatchID.xy];
+    OutputPlane[dispatchID] = _v;    
+}
+
+[numthreads(NUM_THREAD_X,NUM_THREAD_Y,1)]
+void CSPargeTex (uint3 dispatchID : SV_DispatchThreadID)
+{
+	TEX_FORMAT_F1 _v = OutputPlane[dispatchID];
+    SplitY[dispatchID.xy] = _v;
+}

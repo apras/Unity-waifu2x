@@ -1,3 +1,6 @@
+-- waifu2x-converter-cpp --
+files : Assets/Editor/waifu2x/*.*
+
 The MIT License (MIT)
 
 Copyright (c) 2015 Tomoya Kanehira
