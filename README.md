@@ -14,10 +14,10 @@ Editor script that the scale processing by waifu2x in OnPostprocessTexture in As
 ## How to use
 Target image of more than 32px and square.
 32px以上の正方形画像が対象です。
-
+  
 Please add options to the end of the file name.
 ファイル名の後ろにオプションを追加してください。
-
+  
 - Scale only "XXXXXXXXXX**Waifu2x**.xxx"
 - Scale and NoiseReduction type 1 "XXXXXXXXXX**NoiseReduction1Waifu2x**.xxx"
 - Scale and NoiseReduction type 2 "XXXXXXXXXX**NoiseReduction2Waifu2x**.xxx"
