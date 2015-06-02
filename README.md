@@ -11,6 +11,7 @@ Editor script that the scale processing by waifu2x in OnPostprocessTexture in As
 - Windows DX11
 - NVIDIA GPU
 - Intel HD Graphics?
+  
 ## How to use
 Target image of more than 32px and square.
 32px以上の正方形画像が対象です。
