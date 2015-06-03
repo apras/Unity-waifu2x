@@ -1,4 +1,4 @@
--- waifu2x-converter-cpp --
+-- Unity-waifu2x --
 files : Assets/Editor/waifu2x/*.*
 
 The MIT License (MIT)
